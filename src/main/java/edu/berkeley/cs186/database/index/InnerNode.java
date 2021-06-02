@@ -80,43 +80,132 @@ class InnerNode extends BPlusNode {
     // See BPlusNode.get.
     @Override
     public LeafNode get(DataBox key) {
-        // TODO(proj2): implement
+        //dfs
+        int i = numLessThanEqual(key, this.keys);
+        BPlusNode child = getChild(i);
 
-        return null;
+        return child.get(key);
     }
 
     // See BPlusNode.getLeftmostLeaf.
     @Override
     public LeafNode getLeftmostLeaf() {
         assert(children.size() > 0);
-        // TODO(proj2): implement
-
-        return null;
+        BPlusNode child = getChild(0);
+        return child.getLeftmostLeaf();
     }
-
+    private boolean isOverflow(){
+        return this.keys.size() > this.metadata.getOrder() * 2;
+    }
     // See BPlusNode.put.
     @Override
     public Optional<Pair<DataBox, Long>> put(DataBox key, RecordId rid) {
-        // TODO(proj2): implement
+        // put into the child, but we need to deal with node splitting here.
+        int i = numLessThanEqual(key, this.keys);
+        BPlusNode child = this.getChild(i);
 
-        return Optional.empty();
+        Optional<Pair<DataBox, Long>> pair = child.put(key, rid);
+
+        if (! pair.isPresent()) {
+            return pair;
+        }else {
+            //overflow
+            DataBox newKey = pair.get().getFirst();
+            long pageNum = pair.get().getSecond();
+
+            //find the position of key to insert
+            boolean found = false;
+            int pos = 0;
+            while(!found && pos < keys.size()){
+                if(key.compareTo(keys.get(pos)) < 0){
+                    found = true;
+                } else {
+                    pos++;
+                }
+            }
+            //insert the key and record
+            this.keys.add(pos, newKey);
+            this.children.add(pos+1, pageNum);
+
+            // deal with overflow again
+            if (!this.isOverflow()){
+                sync();
+                return Optional.empty();
+            }else {
+                // node splitting here
+                int order = this.metadata.getOrder();
+                List<DataBox> rightKeys = new ArrayList<>();
+                List<Long> rightChildren = new ArrayList<>();
+                // node splitting is a little different from leaf node
+                DataBox middleKey = keys.remove(order);
+                while(keys.size() > order){
+                    rightKeys.add(this.keys.remove(order));
+                    rightChildren.add(this.children.remove(order+1));
+                }
+                rightChildren.add(this.children.remove(order+1));
+
+                InnerNode newRight = new InnerNode(this.metadata, this.bufferManager, rightKeys, rightChildren,
+                        this.treeContext);
+                long rightNodePageNum = newRight.getPage().getPageNum();
+
+                sync();
+                return Optional.of(new Pair<>(middleKey, rightNodePageNum));
+            }
+        }
     }
 
     // See BPlusNode.bulkLoad.
     @Override
     public Optional<Pair<DataBox, Long>> bulkLoad(Iterator<Pair<DataBox, RecordId>> data,
             float fillFactor) {
-        // TODO(proj2): implement
 
+        int pos = this.children.size()  - 1;
+        BPlusNode child = this.getChild(pos);
+
+        Optional<Pair<DataBox, Long>> pair = child.bulkLoad(data, fillFactor);
+        if(! pair.isPresent()) {
+            sync();
+            return  Optional.empty();
+        }else {
+            // deal with overflow
+            DataBox newKey = pair.get().getFirst();
+            long pageNum = pair.get().getSecond();
+            //insert the key and record
+            this.keys.add(newKey);
+            this.children.add(pageNum);
+
+            if(this.isOverflow()) {
+                int order = this.metadata.getOrder();
+                List<DataBox> rightKeys = new ArrayList<>();
+                List<Long> rightChildren = new ArrayList<>();
+
+                DataBox middleKey = keys.remove(order);
+                while(keys.size() > order){
+                    rightKeys.add(this.keys.remove(order));
+                    rightChildren.add(this.children.remove(order+1));
+                }
+                rightChildren.add(this.children.remove(order+1));
+
+                InnerNode newRight = new InnerNode(this.metadata,this.bufferManager, rightKeys, rightChildren,
+                        treeContext);
+                long rightNodePageNum = newRight.getPage().getPageNum();
+                sync();
+                return Optional.of(new Pair<>(middleKey, rightNodePageNum));
+            }
+        }
+        sync();
         return Optional.empty();
     }
 
     // See BPlusNode.remove.
     @Override
     public void remove(DataBox key) {
-        // TODO(proj2): implement
+        int i = numLessThanEqual(key, this.keys);
+        BPlusNode child = this.getChild(i);
 
-        return;
+        child.remove(key);
+
+        sync();
     }
 
     // Helpers /////////////////////////////////////////////////////////////////
