@@ -2,16 +2,14 @@ package edu.berkeley.cs186.database.query.join;
 
 import edu.berkeley.cs186.database.TransactionContext;
 import edu.berkeley.cs186.database.common.iterator.BacktrackingIterator;
+import edu.berkeley.cs186.database.databox.DataBox;
 import edu.berkeley.cs186.database.query.JoinOperator;
 import edu.berkeley.cs186.database.query.MaterializeOperator;
 import edu.berkeley.cs186.database.query.QueryOperator;
 import edu.berkeley.cs186.database.query.SortOperator;
 import edu.berkeley.cs186.database.table.Record;
 
-import java.util.Arrays;
-import java.util.Iterator;
-import java.util.List;
-import java.util.NoSuchElementException;
+import java.util.*;
 
 public class SortMergeOperator extends JoinOperator {
     public SortMergeOperator(QueryOperator leftSource,
@@ -134,14 +132,93 @@ public class SortMergeOperator extends JoinOperator {
             return nextRecord;
         }
 
+        // Helper method for fetching the next record
+        private Record advanceLeft() {
+            if (leftIterator.hasNext()) {
+                leftRecord = leftIterator.next();
+
+            } else {
+                leftRecord = null;
+            }
+            return  leftRecord;
+        }
+
+        // Helper method for fetching the next record
+        private Record advanceRight() {
+            if (rightIterator.hasNext()) {
+                rightRecord = rightIterator.next();
+            } else {
+                rightRecord = null;
+            }
+            return  rightRecord;
+        }
         /**
          * Returns the next record that should be yielded from this join,
          * or null if there are no more records to join.
          */
         private Record fetchNextRecord() {
             // TODO(proj3_part1): implement
-            return null;
+            // like two pointers
+            // but we need to consider a reset situation because records may be duplicated.
+            // The left source was empty, nothing to fetch
+            // a little difficult
+            if (leftRecord == null) {
+                return null;
+            }
+            nextRecord = null;
+            // The right source was empty and it couldn't trace back, nothing to fetch
+            if (rightRecord == null && !marked)
+            {
+                return  null;
+            };
+            // The right source was empty but it could trace back
+            if (rightRecord == null && marked) {
+                rightIterator.reset();
+                advanceLeft();
+                advanceRight();
+                if (leftRecord == null || rightRecord == null) {
+                    return null;
+                }
+                marked = false;
+            }
+            do {
+                if (!marked) {
+                    if (leftRecord == null) {
+                        return null;
+                    }
+
+                    while (compare(leftRecord, rightRecord) < 0) {
+                        if(advanceLeft() == null) {
+                            return null;
+                        }
+                    }
+                    while (compare(leftRecord, rightRecord) > 0) {
+                        if(advanceRight() == null) {
+                            return  null;
+                        }
+                    }
+
+                    // find equal, and mark
+                    rightIterator.markPrev();
+                    marked = true;
+                }
+                if (compare(leftRecord, rightRecord) == 0) {
+                    List<DataBox> values = new ArrayList<>(leftRecord.getValues());
+                    values.addAll(new ArrayList<>(rightRecord.getValues()));
+                    nextRecord = new Record(values);
+                    advanceRight();
+                } else {
+                    rightIterator.reset();
+                    rightRecord = rightIterator.next();
+                    advanceLeft();
+                    marked = false;
+                }
+            } while (nextRecord == null);
+
+            return  nextRecord;
         }
+
+
 
         @Override
         public void remove() {
